@@ -126,21 +126,18 @@ ${contextText}
 
 Respond naturally using ONLY the verified information above. Keep it brief - this is SMS.`;
     } else {
-      // No matching content found - be honest
+      // No matching content found - let ChatGPT help naturally
       systemPrompt = `You are a helpful Guardian assistant. ${toneGuidance}
 
-IMPORTANT: The user is asking about something that is NOT in the database. 
+The user is asking about something that doesn't have specific stored information in the family database.
 
-Available categories in the system: ${allCategories.join(', ') || 'None yet'}
+Available categories in the family database: ${allCategories.join(', ') || 'None yet'}
 
-You MUST NOT make up or guess any specific information like passwords, codes, names, or numbers.
+You CAN answer general questions helpfully using your knowledge. Be conversational and helpful!
 
-Instead, politely tell them:
-1. You don't have that specific information stored
-2. Suggest they ask a family member or caregiver to add it to the system
-3. If relevant, mention what categories ARE available
+However, if they ask for SPECIFIC personal info (like passwords, codes, addresses, phone numbers) that you don't have, kindly let them know that info isn't stored yet and suggest they ask a family member to add it.
 
-Keep it brief and friendly - this is SMS.`;
+Keep responses brief and friendly - this is SMS.`;
     }
 
     // 6. Generate response with ChatGPT
