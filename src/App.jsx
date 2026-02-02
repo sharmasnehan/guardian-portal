@@ -674,18 +674,29 @@ const CaregiverSettings = ({ supabase, userId, showNotification, setCaregiverId 
 
 // --- Simulator ---
 
-const Simulator = ({ supabase, apiKey }) => {
+const Simulator = ({ supabase, openaiKey, setOpenaiKey }) => {
   const [messages, setMessages] = useState([{ role: 'assistant', text: "Simulator ready. Text me a question to see how I'd respond based on your content library." }]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
+  const [showKeyInput, setShowKeyInput] = useState(!openaiKey);
+  const [tempKey, setTempKey] = useState('');
   const scrollRef = useRef(null);
 
   useEffect(() => { 
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight; 
   }, [messages]);
 
+  const saveApiKey = () => {
+    if (tempKey.trim()) {
+      setOpenaiKey(tempKey.trim());
+      localStorage.setItem('openai_key', tempKey.trim());
+      setShowKeyInput(false);
+      setMessages(prev => [...prev, { role: 'assistant', text: "API key saved! You can now test the Guardian assistant." }]);
+    }
+  };
+
   const generateResponse = async (userQuery) => {
-    if (!userQuery.trim()) return;
+    if (!userQuery.trim() || !openaiKey) return;
     setLoading(true);
     
     let contentItems = [];
@@ -711,28 +722,44 @@ const Simulator = ({ supabase, apiKey }) => {
 
     const categoryList = categories.map(c => c.name).join(', ');
 
-    const systemInstruction = `${caregiverProfile?.toneGuidance || "Be helpful and friendly."}\n\nAvailable content categories: ${categoryList}\n\n${contextText}`;
+    const systemPrompt = `${caregiverProfile?.toneGuidance || "Be helpful and friendly. You are a Guardian assistant helping caregivers and their families."}\n\nAvailable content categories: ${categoryList}\n\n${contextText}`;
 
     try {
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`, {
+      const response = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${openaiKey}`
+        },
         body: JSON.stringify({ 
-          contents: [{ parts: [{ text: userQuery }] }], 
-          systemInstruction: { parts: [{ text: systemInstruction }] } 
+          model: 'gpt-4o-mini',
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userQuery }
+          ],
+          max_tokens: 500
         })
       });
       const data = await response.json();
-      const aiText = data.candidates?.[0]?.content?.parts?.[0]?.text || "No response generated.";
-      setMessages(prev => [...prev, { role: 'assistant', text: aiText, isMatch: matches.length > 0 }]);
+      
+      if (data.error) {
+        setMessages(prev => [...prev, { role: 'assistant', text: `Error: ${data.error.message}` }]);
+      } else {
+        const aiText = data.choices?.[0]?.message?.content || "No response generated.";
+        setMessages(prev => [...prev, { role: 'assistant', text: aiText, isMatch: matches.length > 0 }]);
+      }
     } catch (e) { 
-      setMessages(prev => [...prev, { role: 'assistant', text: "Error connecting to AI." }]); 
+      setMessages(prev => [...prev, { role: 'assistant', text: "Error connecting to OpenAI. Check your API key." }]); 
     }
     setLoading(false);
   };
 
   const handleSend = () => {
     if (!input.trim() || loading) return;
+    if (!openaiKey) {
+      setShowKeyInput(true);
+      return;
+    }
     const msg = input;
     setMessages(prev => [...prev, { role: 'user', text: msg }]);
     setInput('');
@@ -744,9 +771,37 @@ const Simulator = ({ supabase, apiKey }) => {
   return (
     <div className="h-full flex items-center justify-center p-6 bg-slate-50 animate-in fade-in duration-500">
       <div className="w-full max-w-sm bg-white rounded-[3rem] shadow-2xl border-8 border-slate-800 h-[640px] flex flex-col overflow-hidden relative">
-        <div className="bg-slate-100 p-4 border-b text-center text-[10px] font-bold text-slate-400 pt-8 uppercase tracking-widest">
-          Guardian Simulator
+        <div className="bg-slate-100 p-4 border-b text-center text-[10px] font-bold text-slate-400 pt-8 uppercase tracking-widest flex items-center justify-center gap-2">
+          <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+          Guardian Simulator (GPT-4o)
         </div>
+        
+        {showKeyInput && (
+          <div className="absolute inset-0 bg-white/95 backdrop-blur-sm z-10 flex items-center justify-center p-6 rounded-[3rem]">
+            <div className="w-full space-y-4 text-center">
+              <div className="w-12 h-12 bg-emerald-100 rounded-full flex items-center justify-center mx-auto">
+                <Key size={24} className="text-emerald-600" />
+              </div>
+              <h3 className="font-bold text-slate-800">OpenAI API Key</h3>
+              <p className="text-xs text-slate-500">Enter your API key to power the simulator with ChatGPT</p>
+              <input 
+                type="password"
+                value={tempKey}
+                onChange={(e) => setTempKey(e.target.value)}
+                placeholder="sk-..."
+                className="w-full p-3 border rounded-xl text-sm font-mono outline-none focus:border-emerald-500"
+              />
+              <button 
+                onClick={saveApiKey}
+                className="w-full bg-slate-900 text-white py-3 rounded-xl text-sm font-medium hover:bg-slate-800"
+              >
+                Save & Continue
+              </button>
+              <p className="text-[10px] text-slate-400">Key is stored locally in your browser</p>
+            </div>
+          </div>
+        )}
+
         <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-50/50">
           {messages.map((m, i) => (
             <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
@@ -756,7 +811,7 @@ const Simulator = ({ supabase, apiKey }) => {
               </div>
             </div>
           ))}
-          {loading && <div className="flex justify-start animate-pulse"><div className="bg-slate-200 rounded-full px-4 py-1 text-[10px] text-slate-500 italic">Typing...</div></div>}
+          {loading && <div className="flex justify-start animate-pulse"><div className="bg-slate-200 rounded-full px-4 py-1 text-[10px] text-slate-500 italic">ChatGPT is typing...</div></div>}
         </div>
         <div className="p-3 bg-white border-t flex gap-2 items-center">
           <input 
@@ -851,6 +906,7 @@ export default function App() {
   const [isScriptLoaded, setIsScriptLoaded] = useState(false);
   const [userId, setUserId] = useState('default-user'); // Simplified for demo
   const [caregiverId, setCaregiverId] = useState(null);
+  const [openaiKey, setOpenaiKey] = useState('');
 
   useEffect(() => {
     if (window.supabase) { setIsScriptLoaded(true); return; }
@@ -859,6 +915,12 @@ export default function App() {
     script.async = true;
     script.onload = () => setIsScriptLoaded(true);
     document.head.appendChild(script);
+  }, []);
+
+  useEffect(() => {
+    // Load saved OpenAI key
+    const savedOpenaiKey = localStorage.getItem('openai_key');
+    if (savedOpenaiKey) setOpenaiKey(savedOpenaiKey);
   }, []);
 
   useEffect(() => {
@@ -888,8 +950,6 @@ export default function App() {
 
   const showNotification = (msg) => { setNotif(msg); setTimeout(() => setNotif(null), 3000); };
 
-  const apiKey = ""; // Environment provided
-
   return (
     <div className="flex h-screen w-full bg-slate-50 font-sans text-slate-900 overflow-hidden">
       <Navigation activeTab={activeTab} setActiveTab={setActiveTab} />
@@ -906,7 +966,7 @@ export default function App() {
         {activeTab === 'recipients' && <Recipients supabase={supabase} userId={userId} caregiverId={caregiverId} showNotification={showNotification} />}
         {activeTab === 'conversations' && <Conversations supabase={supabase} showNotification={showNotification} />}
         {activeTab === 'settings' && <CaregiverSettings supabase={supabase} userId={userId} showNotification={showNotification} setCaregiverId={setCaregiverId} />}
-        {activeTab === 'simulator' && <Simulator supabase={supabase} apiKey={apiKey} />}
+        {activeTab === 'simulator' && <Simulator supabase={supabase} openaiKey={openaiKey} setOpenaiKey={setOpenaiKey} />}
       </main>
       <MobileNav activeTab={activeTab} setActiveTab={setActiveTab} />
       {notif && (
