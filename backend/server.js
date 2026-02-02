@@ -63,30 +63,56 @@ app.post('/sms', async (req, res) => {
 
     // 4. Find relevant content based on keywords
     const lowerMessage = messageBody.toLowerCase();
-    const relevantContent = (contentItems || []).filter(item => 
-      lowerMessage.includes(item.title.toLowerCase()) ||
-      (item.keywords && item.keywords.some(kw => lowerMessage.includes(kw.toLowerCase()))) ||
-      (item.description && item.description.toLowerCase().split(' ').some(word => 
-        lowerMessage.includes(word) && word.length > 3
-      ))
-    );
-
-    // 5. Build context for ChatGPT
-    const contextText = relevantContent.length > 0
-      ? "RELEVANT INFORMATION:\n" + relevantContent.map(item => 
-          `- ${item.title} (${item.Category?.name || 'General'}): ${item.description || 'No details'}`
-        ).join("\n")
-      : "No specific information found in the database for this query.";
+    const messageWords = lowerMessage.split(/\s+/).filter(w => w.length > 2);
+    
+    const relevantContent = (contentItems || []).filter(item => {
+      const titleMatch = item.title && lowerMessage.includes(item.title.toLowerCase());
+      const keywordMatch = item.keywords && item.keywords.some(kw => 
+        lowerMessage.includes(kw.toLowerCase()) || 
+        messageWords.some(word => kw.toLowerCase().includes(word))
+      );
+      const descriptionMatch = item.description && messageWords.some(word => 
+        item.description.toLowerCase().includes(word)
+      );
+      return titleMatch || keywordMatch || descriptionMatch;
+    });
 
     const allCategories = [...new Set((contentItems || []).map(i => i.Category?.name).filter(Boolean))];
 
-    const systemPrompt = `You are a helpful Guardian assistant. ${toneGuidance}
+    // 5. Build context for ChatGPT - STRICT MODE
+    let systemPrompt;
+    
+    if (relevantContent.length > 0) {
+      // We found matching content - use ONLY this information
+      const contextText = relevantContent.map(item => 
+        `• ${item.title}: ${item.description}`
+      ).join("\n");
+      
+      systemPrompt = `You are a helpful Guardian assistant. ${toneGuidance}
 
-Available information categories: ${allCategories.join(', ') || 'None set up yet'}
+IMPORTANT: You MUST only use the information provided below. Do NOT make up, guess, or invent any details like passwords, names, codes, or numbers.
 
+VERIFIED INFORMATION FROM DATABASE:
 ${contextText}
 
-Keep responses concise and friendly - this is an SMS conversation. If you don't have specific information, say so kindly and suggest they contact a family member.`;
+Respond naturally using ONLY the verified information above. Keep it brief - this is SMS.`;
+    } else {
+      // No matching content found - be honest
+      systemPrompt = `You are a helpful Guardian assistant. ${toneGuidance}
+
+IMPORTANT: The user is asking about something that is NOT in the database. 
+
+Available categories in the system: ${allCategories.join(', ') || 'None yet'}
+
+You MUST NOT make up or guess any specific information like passwords, codes, names, or numbers.
+
+Instead, politely tell them:
+1. You don't have that specific information stored
+2. Suggest they ask a family member or caregiver to add it to the system
+3. If relevant, mention what categories ARE available
+
+Keep it brief and friendly - this is SMS.`;
+    }
 
     // 6. Generate response with ChatGPT
     const completion = await openai.chat.completions.create({
