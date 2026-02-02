@@ -904,7 +904,7 @@ export default function App() {
   const [dbConfig, setDbConfig] = useState({ url: '', key: '' });
   const [notif, setNotif] = useState(null);
   const [isScriptLoaded, setIsScriptLoaded] = useState(false);
-  const [userId, setUserId] = useState('default-user'); // Simplified for demo
+  const [userId, setUserId] = useState(null);
   const [caregiverId, setCaregiverId] = useState(null);
   const [openaiKey, setOpenaiKey] = useState('');
 
@@ -931,17 +931,43 @@ export default function App() {
       setDbConfig(parsed);
       if (parsed.url && parsed.key) {
         const client = getSupabaseClient(parsed.url, parsed.key);
-        if (client) { setSupabase(client); setActiveTab('content'); }
+        if (client) { 
+          setSupabase(client); 
+          setActiveTab('content');
+          // Fetch the first user from the database
+          client.from('User').select('id').limit(1).single().then(({ data }) => {
+            if (data?.id) setUserId(data.id);
+          });
+        }
       }
     }
   }, [isScriptLoaded]);
 
-  const initSupabase = (url, key) => {
+  const initSupabase = async (url, key) => {
     const client = getSupabaseClient(url, key);
     if (client) { 
       setSupabase(client); 
       setDbConfig({url, key}); 
       localStorage.setItem('sb_config', JSON.stringify({ url, key })); 
+      
+      // Fetch or create user
+      const { data: existingUser } = await client.from('User').select('id').limit(1).single();
+      if (existingUser?.id) {
+        setUserId(existingUser.id);
+      } else {
+        // Create a new user if none exists
+        const newUserId = crypto.randomUUID();
+        await client.from('User').insert({
+          id: newUserId,
+          email: 'user@guardian.local',
+          password: 'placeholder',
+          name: 'Guardian User',
+          role: 'CAREGIVER',
+          updatedAt: new Date().toISOString()
+        });
+        setUserId(newUserId);
+      }
+      
       setActiveTab('content'); 
       showNotification("Connected to Supabase");
     }
