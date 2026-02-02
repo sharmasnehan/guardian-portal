@@ -22,7 +22,9 @@ import {
   ArrowLeft,
   Image,
   Video,
-  Music
+  Music,
+  Pencil,
+  X
 } from 'lucide-react';
 
 /**
@@ -95,6 +97,8 @@ const ContentLibrary = ({ supabase, userId, showNotification }) => {
   const [showContentForm, setShowContentForm] = useState(false);
   const [categoryForm, setCategoryForm] = useState({ name: '', description: '' });
   const [contentForm, setContentForm] = useState({ title: '', description: '', mediaUrl: '', mediaType: '', keywords: '' });
+  const [editingCategory, setEditingCategory] = useState(null);
+  const [editingContent, setEditingContent] = useState(null);
 
   const fetchCategories = async () => {
     if (!supabase) return;
@@ -190,6 +194,83 @@ const ContentLibrary = ({ supabase, userId, showNotification }) => {
     }
   };
 
+  const handleEditCategory = (cat) => {
+    setEditingCategory(cat);
+    setCategoryForm({ name: cat.name, description: cat.description || '' });
+    setShowCategoryForm(true);
+  };
+
+  const handleUpdateCategory = async (e) => {
+    e.preventDefault();
+    if (!supabase || !editingCategory) return;
+    const { error } = await supabase
+      .from('Category')
+      .update({ 
+        name: categoryForm.name, 
+        description: categoryForm.description,
+        updatedAt: new Date().toISOString()
+      })
+      .eq('id', editingCategory.id);
+    if (error) showNotification('Error updating category');
+    else {
+      setCategoryForm({ name: '', description: '' });
+      setShowCategoryForm(false);
+      setEditingCategory(null);
+      showNotification('Category updated!');
+      fetchCategories();
+      // Update selectedCategory if we're editing it
+      if (selectedCategory?.id === editingCategory.id) {
+        setSelectedCategory({ ...selectedCategory, name: categoryForm.name, description: categoryForm.description });
+      }
+    }
+  };
+
+  const handleEditContent = (item) => {
+    setEditingContent(item);
+    setContentForm({ 
+      title: item.title, 
+      description: item.description || '', 
+      mediaUrl: item.mediaUrl || '', 
+      mediaType: item.mediaType || '', 
+      keywords: item.keywords ? item.keywords.join(', ') : '' 
+    });
+    setShowContentForm(true);
+  };
+
+  const handleUpdateContent = async (e) => {
+    e.preventDefault();
+    if (!supabase || !editingContent) return;
+    const keywordsArray = contentForm.keywords.split(',').map(k => k.trim().toLowerCase()).filter(Boolean);
+    const { error } = await supabase
+      .from('ContentItem')
+      .update({ 
+        title: contentForm.title, 
+        description: contentForm.description,
+        mediaUrl: contentForm.mediaUrl || null,
+        mediaType: contentForm.mediaType || null,
+        keywords: keywordsArray,
+        updatedAt: new Date().toISOString()
+      })
+      .eq('id', editingContent.id);
+    if (error) showNotification('Error updating content');
+    else {
+      setContentForm({ title: '', description: '', mediaUrl: '', mediaType: '', keywords: '' });
+      setShowContentForm(false);
+      setEditingContent(null);
+      showNotification('Content updated!');
+      fetchContentItems(selectedCategory.id);
+    }
+  };
+
+  const cancelEdit = () => {
+    setEditingCategory(null);
+    setEditingContent(null);
+    setCategoryForm({ name: '', description: '' });
+    setContentForm({ title: '', description: '', mediaUrl: '', mediaType: '', keywords: '' });
+    setShowCategoryForm(false);
+    setShowContentForm(false);
+  };
+
   const getMediaIcon = (type) => {
     if (!type) return <FileText size={16} className="text-slate-400" />;
     if (type.includes('image')) return <Image size={16} className="text-blue-500" />;
@@ -216,7 +297,10 @@ const ContentLibrary = ({ supabase, userId, showNotification }) => {
             <p className="text-slate-500">{selectedCategory.description || 'No description'}</p>
           </div>
           <button 
-            onClick={() => setShowContentForm(!showContentForm)} 
+            onClick={() => {
+              if (showContentForm) cancelEdit();
+              else setShowContentForm(true);
+            }} 
             className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg flex items-center gap-2 transition-transform active:scale-95"
           >
             {showContentForm ? 'Cancel' : <><Plus size={18} /> Add Content</>}
@@ -224,7 +308,15 @@ const ContentLibrary = ({ supabase, userId, showNotification }) => {
         </div>
 
         {showContentForm && (
-          <form onSubmit={handleAddContent} className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 space-y-4 animate-in slide-in-from-top-4 duration-300">
+          <form onSubmit={editingContent ? handleUpdateContent : handleAddContent} className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 space-y-4 animate-in slide-in-from-top-4 duration-300">
+            <div className="flex justify-between items-center">
+              <h3 className="font-semibold text-slate-700">{editingContent ? 'Edit Content' : 'Add Content'}</h3>
+              {editingContent && (
+                <button type="button" onClick={cancelEdit} className="text-slate-400 hover:text-slate-600">
+                  <X size={20} />
+                </button>
+              )}
+            </div>
             <input 
               value={contentForm.title} 
               onChange={(e) => setContentForm({...contentForm, title: e.target.value})} 
@@ -264,7 +356,7 @@ const ContentLibrary = ({ supabase, userId, showNotification }) => {
               className="w-full p-3 border rounded-lg outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500" 
             />
             <button type="submit" className="w-full bg-slate-900 text-white py-3 rounded-lg hover:bg-slate-800 transition-colors">
-              Save Content Item
+              {editingContent ? 'Update Content' : 'Save Content Item'}
             </button>
           </form>
         )}
@@ -272,17 +364,25 @@ const ContentLibrary = ({ supabase, userId, showNotification }) => {
         <div className="space-y-3">
           {contentItems.map((item) => (
             <div key={item.id} className="bg-white p-5 rounded-xl shadow-sm border border-slate-200 group relative hover:border-emerald-400 transition-colors">
-              <button 
-                onClick={() => handleDeleteContent(item.id)} 
-                className="absolute top-4 right-4 text-slate-300 hover:text-red-500 transition-colors"
-              >
-                <Trash2 size={16}/>
-              </button>
+              <div className="absolute top-4 right-4 flex gap-2">
+                <button 
+                  onClick={() => handleEditContent(item)} 
+                  className="text-slate-300 hover:text-blue-500 transition-colors"
+                >
+                  <Pencil size={16}/>
+                </button>
+                <button 
+                  onClick={() => handleDeleteContent(item.id)} 
+                  className="text-slate-300 hover:text-red-500 transition-colors"
+                >
+                  <Trash2 size={16}/>
+                </button>
+              </div>
               <div className="flex items-start gap-4">
                 <div className="w-10 h-10 bg-slate-100 rounded-lg flex items-center justify-center">
                   {getMediaIcon(item.mediaType)}
                 </div>
-                <div className="flex-1">
+                <div className="flex-1 pr-16">
                   <h3 className="font-semibold text-slate-800 mb-1">{item.title}</h3>
                   <p className="text-slate-600 text-sm">{item.description || 'No description'}</p>
                   {item.keywords && item.keywords.length > 0 && (
@@ -316,7 +416,10 @@ const ContentLibrary = ({ supabase, userId, showNotification }) => {
           <p className="text-slate-500">Organize knowledge into categories.</p>
         </div>
         <button 
-          onClick={() => setShowCategoryForm(!showCategoryForm)} 
+          onClick={() => {
+            if (showCategoryForm) cancelEdit();
+            else setShowCategoryForm(true);
+          }} 
           className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg flex items-center gap-2 transition-transform active:scale-95"
         >
           {showCategoryForm ? 'Cancel' : <><Plus size={18} /> New Category</>}
@@ -324,7 +427,15 @@ const ContentLibrary = ({ supabase, userId, showNotification }) => {
       </div>
 
       {showCategoryForm && (
-        <form onSubmit={handleAddCategory} className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 space-y-4 animate-in slide-in-from-top-4 duration-300">
+        <form onSubmit={editingCategory ? handleUpdateCategory : handleAddCategory} className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 space-y-4 animate-in slide-in-from-top-4 duration-300">
+          <div className="flex justify-between items-center">
+            <h3 className="font-semibold text-slate-700">{editingCategory ? 'Edit Category' : 'New Category'}</h3>
+            {editingCategory && (
+              <button type="button" onClick={cancelEdit} className="text-slate-400 hover:text-slate-600">
+                <X size={20} />
+              </button>
+            )}
+          </div>
           <input 
             value={categoryForm.name} 
             onChange={(e) => setCategoryForm({...categoryForm, name: e.target.value})} 
@@ -339,7 +450,7 @@ const ContentLibrary = ({ supabase, userId, showNotification }) => {
             className="w-full p-3 border rounded-lg h-20 outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500" 
           />
           <button type="submit" className="w-full bg-slate-900 text-white py-3 rounded-lg hover:bg-slate-800 transition-colors">
-            Create Category
+            {editingCategory ? 'Update Category' : 'Create Category'}
           </button>
         </form>
       )}
@@ -351,12 +462,20 @@ const ContentLibrary = ({ supabase, userId, showNotification }) => {
             className="bg-white p-5 rounded-xl shadow-sm border border-slate-200 group relative hover:border-emerald-400 hover:shadow-md transition-all cursor-pointer"
             onClick={() => setSelectedCategory(cat)}
           >
-            <button 
-              onClick={(e) => { e.stopPropagation(); handleDeleteCategory(cat.id); }} 
-              className="absolute top-4 right-12 text-slate-300 hover:text-red-500 transition-colors"
-            >
-              <Trash2 size={16}/>
-            </button>
+            <div className="absolute top-4 right-12 flex gap-2">
+              <button 
+                onClick={(e) => { e.stopPropagation(); handleEditCategory(cat); }} 
+                className="text-slate-300 hover:text-blue-500 transition-colors"
+              >
+                <Pencil size={16}/>
+              </button>
+              <button 
+                onClick={(e) => { e.stopPropagation(); handleDeleteCategory(cat.id); }} 
+                className="text-slate-300 hover:text-red-500 transition-colors"
+              >
+                <Trash2 size={16}/>
+              </button>
+            </div>
             <ChevronRight size={20} className="absolute top-4 right-4 text-slate-300 group-hover:text-emerald-500 transition-colors" />
             <div className="flex items-center gap-3 mb-2">
               <div className="w-10 h-10 bg-emerald-100 rounded-lg flex items-center justify-center">
