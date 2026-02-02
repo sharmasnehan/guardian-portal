@@ -55,16 +55,22 @@ app.post('/sms', async (req, res) => {
     const toneGuidance = recipient.CaregiverProfile?.toneGuidance || 
       'Be helpful, warm, and patient. Use simple language.';
 
-    // 3. Fetch all content items for context
+    // 3. Fetch all content items AND categories for context
     const { data: contentItems } = await supabase
       .from('ContentItem')
       .select('*, Category(name)')
+      .eq('userId', recipient.userId);
+    
+    const { data: categories } = await supabase
+      .from('Category')
+      .select('*')
       .eq('userId', recipient.userId);
 
     // 4. Find relevant content based on keywords
     const lowerMessage = messageBody.toLowerCase();
     const messageWords = lowerMessage.split(/\s+/).filter(w => w.length > 2);
     
+    // Search ContentItems
     const relevantContent = (contentItems || []).filter(item => {
       const titleMatch = item.title && lowerMessage.includes(item.title.toLowerCase());
       const keywordMatch = item.keywords && item.keywords.some(kw => 
@@ -77,16 +83,39 @@ app.post('/sms', async (req, res) => {
       return titleMatch || keywordMatch || descriptionMatch;
     });
 
-    const allCategories = [...new Set((contentItems || []).map(i => i.Category?.name).filter(Boolean))];
+    // Also search Category names and descriptions (in case info is stored there)
+    const relevantCategories = (categories || []).filter(cat => {
+      const nameMatch = cat.name && lowerMessage.includes(cat.name.toLowerCase().trim());
+      const descMatch = cat.description && messageWords.some(word => 
+        cat.description.toLowerCase().includes(word)
+      );
+      return nameMatch || descMatch;
+    });
+
+    const allCategories = [...new Set((categories || []).map(c => c.name).filter(Boolean))];
 
     // 5. Build context for ChatGPT - STRICT MODE
     let systemPrompt;
     
-    if (relevantContent.length > 0) {
+    // Combine content from both ContentItems and Categories
+    const hasContent = relevantContent.length > 0 || relevantCategories.length > 0;
+    
+    if (hasContent) {
       // We found matching content - use ONLY this information
-      const contextText = relevantContent.map(item => 
-        `• ${item.title}: ${item.description}`
-      ).join("\n");
+      let contextText = '';
+      
+      if (relevantContent.length > 0) {
+        contextText += relevantContent.map(item => 
+          `• ${item.title}: ${item.description}`
+        ).join("\n");
+      }
+      
+      if (relevantCategories.length > 0) {
+        if (contextText) contextText += "\n";
+        contextText += relevantCategories.map(cat => 
+          `• ${cat.name}: ${cat.description}`
+        ).join("\n");
+      }
       
       systemPrompt = `You are a helpful Guardian assistant. ${toneGuidance}
 
